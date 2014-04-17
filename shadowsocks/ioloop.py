@@ -93,10 +93,10 @@ class IOLoop(object):
                 handler.handle_error(fd, events)
             elif events & MY_POLLEV_IN or events & MY_POLLEV_PRI:
                 # logging.debug("fd[%s] events MY_POLLEV_IN | MY_POLLEV_PRI", fd)
-                handler.handle_read()
+                handler.handle_read(fd, events)
             elif events & MY_POLLEV_OUT:
                 # logging.debug("fd[%s] events MY_POLLEV_OUT", fd)
-                handler.handle_write()
+                handler.handle_write(fd, events)
             else:
                 logging.error("unknow events %d", events)
 
@@ -156,17 +156,17 @@ class SocketStream(IOStream):
 class BaseHandler(object):
     monitor_read = True
     monitor_write = True
-    def __init__(self):
+    def __init__(self, _ioloop, _ios):
         raise
 
-    def handle_read(self):
+    def handle_read(self, fd, events):
         raise
 
-    def handle_write(self):
+    def handle_write(self, fd, events):
         raise
 
     def handle_error(self, fd, events):
-        logging.warn("socket error, fd: %d, events: %d", fd, events)
+        raise
 
 
 class IOHandler(BaseHandler):
@@ -177,7 +177,7 @@ class IOHandler(BaseHandler):
         self._ios = iostream
         self._fd = self._ios.fileno()
 
-    def handle_read(self):
+    def handle_read(self, fd, events):
         """fd 可读事件出现"""
         # logging.debug("read from fd %s", self._fd)
         try:
@@ -201,7 +201,7 @@ class IOHandler(BaseHandler):
         else:
             return self._ios.read()
 
-    def handle_write(self):
+    def handle_write(self, fd, events):
         """fd 可写事件出现"""
         self._ios.real_write()
 
@@ -222,8 +222,8 @@ class SimpleCopyFileHandler(IOHandler):
         self._outfp = open(self._outfile, 'wb')
         self.last_len = 0
 
-    def handle_read(self):
-        s = super(self.__class__, self).handle_read()
+    def handle_read(self, fd, events):
+        s = super(self.__class__, self).handle_read(fd, events)
         if s:
             self._outfp.write(s)
             curr_len = self._outfp.tell()
@@ -243,7 +243,7 @@ class SimpleAcceptHandler(BaseHandler):
         self._ioloop = ioloop
         self._srv_socket = srv_socket
 
-    def handle_read(self):
+    def handle_read(self, fd, events):
         cli_socket, cli_addr = self._srv_socket.accept()
         logging.debug("accept connect[%s] from %s:%s" % (
             cli_socket.fileno(), cli_addr[0], cli_addr[1]))

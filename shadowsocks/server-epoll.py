@@ -158,7 +158,7 @@ class BaseTunnelHandler(ioloop.IOHandler):
     def set_remote_ts(self, sock):
         raise
 
-    def handle_read(self):
+    def handle_read(self, fd, events):
         """fd 可读事件出现"""
         # logging.info("%r, remote_ios: %r, _rs_connecting: %r", self, self._remote_ios, self._rs_connecting)
         if not self._remote_ios:
@@ -221,6 +221,8 @@ class LeftTunnelHandler(BaseTunnelHandler):
             remote_socket.setblocking(0)
 
             try:
+                ret = remote_socket.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                logging.info("ret: %r", ret)
                 remote_socket.connect((addr, port))
             except socket.error, _e:
                 if _e.errno != errno.EINPROGRESS:
@@ -263,36 +265,40 @@ class RightTunnelHandler(BaseTunnelHandler):
         # logging.debug('send to left: %s', list(data))
         self._remote_ios.write(data)
 
-class ShadowConnectHandler(ioloop.BaseHandler):
+class ShadowConnectHandler(BaseTunnelHandler):
     def __init__(self, _ioloop, left_handler, right_ts):
         self._ioloop = _ioloop
         self._left_handler = left_handler
         self._left_ts = self._left_handler._ios
         self._right_ts = right_ts
-    def handle_write(self):
-        self.handle_connect_res()
+        self._ios = self._right_ts
+        self._remote_ios = self._left_ts
 
-    def handle_read(self):
-        self.handle_connect_res()
+    def handle_write(self, fd, events):
+        self.handle_connect_res(fd, events)
 
-    def handle_connect_res(self):
+    def handle_read(self, fd, events):
+        self.handle_connect_res(fd, events)
+
+    def handle_connect_res(self, fd, events):
+        ret = self._right_ts._obj.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+        logging.info("ret: %r", ret)
+
         self._left_handler.set_remote_ios(self._right_ts)
-        print self._left_handler._remote_ios
 
         handler = RightTunnelHandler( self._left_ts, self._ioloop, self._right_ts)
         self._ioloop.modify_handler( self._right_ts.fileno(), handler, m_read=True, m_write=True) 
 
         logging.info('New tunnel (%d,%d) <=> (%d,%d)' % (
             self._left_handler._ios.fileno(), self._left_handler._remote_ios.fileno(), 
-            handler._ios.fileno(), handler._remote_ios.fileno(), 
-            ))
+            handler._ios.fileno(), handler._remote_ios.fileno()))
 
 class ShadowAcceptHandler(ioloop.BaseHandler):
     def __init__(self, _ioloop, srv_socket):
         self._ioloop = _ioloop
         self._srv_socket = srv_socket
 
-    def handle_read(self):
+    def handle_read(self, fd, events):
         cli_socket, cli_addr = self._srv_socket.accept()
         logging.debug("accept connect[%s] from %s:%s" % (
             cli_socket.fileno(), cli_addr[0], cli_addr[1]))
