@@ -121,6 +121,13 @@ class IOStream(object):
             self._obj.write(self._wbuf.getvalue())
             self._wbuf.truncate(0)
 
+    def safe_close(self):
+        try:
+            self.close()
+        except Exception, e:
+            logging.warn("close error: %s", e)
+            
+
     def close(self):
         return self._obj.close()
 
@@ -203,7 +210,7 @@ class IOHandler(BaseHandler):
 
     def handle_error(self, events):
         logging.error("handle_error fd(%s), events: %r", self._fd, events)
-        self._ios.close()
+        self._ios.safe_close()
 
 
 class SimpleCopyFileHandler(IOHandler):
