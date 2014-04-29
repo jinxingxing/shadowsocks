@@ -125,6 +125,13 @@ class IOStream(object):
             self._obj.write(self._wbuf.getvalue())
             self._wbuf.truncate(0)
 
+    def safe_close(self):
+        try:
+            self.close()
+        except Exception, e:
+            logging.warn("IOStream.close() error: %s", e)
+
+
     def close(self):
         return self._obj.close()
 
