@@ -143,18 +143,23 @@ class SocketStream(IOStream):
     def read(self, size):
         return self._obj.recv(size)
 
-    def real_write(self):
+    def real_write(self, block_size=4096):
         if self._wbuf.tell() > 0:
-            data = self._wbuf.getvalue()
-            try:
-                self._obj.sendall(data)
-            except socket.error, _e:
-                if _e.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
-                    import errno
-                    logging.debug('socket.error: %d', errno.errorcode.get(_e.errno, 0))
-                    return 
-
+            data = self._wbuf.getvalue(block_size)
+            tmp_read_buf = StringIO(data)
             self._wbuf.truncate(0)
+            while 1:
+                s = tmp_read_buf.read()
+                if not s: break
+                try:
+                    sl = self._obj.send(s)
+                    logging.debug("send %d bytes, real send %d", len(s), sl)
+                except socket.error, _e:
+                    if _e.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
+                        logging.debug('real_write(), socket.error %s', errno.errorcode.get(_e.errno, None))
+                        self._wbuf.write(s[sl:])
+                        self._wbuf.write(tmp_read_buf.read())
+                        return 
     
     def close(self):
         if isinstance(self._obj, socket._socketobject):

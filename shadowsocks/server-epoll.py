@@ -101,6 +101,12 @@ class BaseTunnelHandler(ioloop.IOHandler):
         self._ioloop.remove_handler(self._ios.fileno())
         self._ios.safe_close()
 
+        if self._remote_ios:
+            logging.debug('!!!!!!!!!!! close remote ios %d', 
+                self._remote_ios.fileno())
+            self._ioloop.remove_handler(self._remote_ios.fileno())
+            self._remote_ios.safe_close()
+
 class ShadowClientConnHandler(BaseTunnelHandler):
     def __init__(self, _ioloop, _ios, *args, **kwargs):
         BaseTunnelHandler.__init__(self, _ioloop, _ios, *args, **kwargs)
@@ -127,7 +133,7 @@ class ShadowClientConnHandler(BaseTunnelHandler):
             addr = socket.inet_ntop(socket.AF_INET6, self.decrypt(rfile.read(16)))
         else:
             # not supported
-            logging.warn('addr_type(%d) not supported, maybe wrong password', addrtype)
+            logging.warn('addr_type(%r) not supported, maybe wrong password', addrtype)
             return
         port = struct.unpack('>H', self.decrypt(rfile.read(2)))[0]
         try:
