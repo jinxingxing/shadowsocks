@@ -1,7 +1,7 @@
 #coding: utf8
 
 import sys
-sys.setrecursionlimit(30)
+sys.setrecursionlimit(60)
 if sys.version_info < (2, 6):
     import simplejson as json
 else:
@@ -92,7 +92,8 @@ class BaseTunnelHandler(ioloop.BaseHandler):
     def close_tunnel(self):
         self._closing =  True
         if self._remote_ios:
-            logging.debug('!!!!!!!!!!! close remote ios %d', self._remote_ios.fileno())
+            logging.debug('!!!!!!!!!!! close remote ios %d', 
+                self._remote_ios.fileno())
             self._ioloop.remove_handler(self._remote_ios.fileno())
             self._remote_ios._obj.close()
 
@@ -101,16 +102,91 @@ class BaseTunnelHandler(ioloop.BaseHandler):
         self._ios.close()
 
     def handle_read(self, fd, events):
-        
+        raise NotImplementedError
 
     def handle_write(self, fd, events):
-        raise
+        raise NotImplementedError
 
     def handle_error(self, fd, events):
-        raise
+        raise NotImplementedError
 
 
 class ShadowTunnelHandler(BaseTunnelHandler):
     def __init__(self, *args, **kwargs):
         BaseTunnelHandler.__init__(self, *args, **kwargs)
 
+class ShadowAcceptHandler(ioloop.BaseHandler):
+    def __init__(self, _ioloop, srv_socket):
+        self._ioloop = _ioloop
+        self._srv_socket = srv_socket
+
+    def handle_read(self, fd, events):
+        cli_socket, cli_addr = self._srv_socket.accept()
+        logging.debug("accept connect[%s] from %s:%s" % (
+            cli_socket.fileno(), cli_addr[0], cli_addr[1]))
+        cli_socket.setblocking(0)
+        ts = TunnelStream(cli_socket)
+        handler = LeftTunnelHandler( self._ioloop, ts)
+        self._ioloop.add_handler(cli_socket.fileno(), handler, 
+            m_read=True, m_write=True) 
+
+def main():
+    logging.basicConfig(level=logging.DEBUG,
+                        format='%(asctime)s %(levelname)-8s # %(message)s',
+                        datefmt='%Y-%m-%d %H:%M:%S', filemode='a+')
+
+    config = parse_options()
+
+    SERVER = config['server']
+    PORT = config['server_port']
+    KEY = config['password']
+
+    config['method'] = config.get('method', None)
+    METHOD = config.get('method')
+
+    config['port_password'] = config.get('port_password', None)
+    PORTPASSWORD = config.get('port_password')
+
+    config['timeout'] = config.get('timeout', 600)
+
+    if not KEY and not config_path:
+        sys.exit('config not specified, please read https://github.com/clowwindy/shadowsocks')
+
+    utils.check_config(config)
+
+    global G_CONFIG
+    G_CONFIG = config
+
+    if PORTPASSWORD:
+        if PORT or KEY:
+            logging.warn('warning: port_password should not be used with server_port and password. server_port and password will be ignored')
+    else:
+        PORTPASSWORD = {}
+        PORTPASSWORD[str(PORT)] = KEY
+
+    encrypt.init_table(KEY, METHOD)
+
+    io = ioloop.IOLoop()
+    import socket
+    sock = socket.socket()
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.setblocking(0)
+    sock.bind((SERVER, PORT))
+    logging.info("listing on %s", str(sock.getsockname()))
+    sock.listen(1024)
+    io.add_handler(sock.fileno(), ShadowAcceptHandler(io, sock), m_read=True)
+    next_tick = time.time() + 10
+    count = 0
+    while True:
+        count += 1
+        if time.time() >= next_tick:
+            logging.info("loop count %d", count)
+            next_tick = time.time() + 10
+            pass
+        _s = time.time()
+        io.wait_events(0.1)
+        use_time = time.time() - _s
+        if use_time > 0.2:
+            logging.error("events process cost time: %f", _e-_s)
+        elif use_time < 0.1:
+            time.sleep(0.1-use_time)

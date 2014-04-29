@@ -307,7 +307,7 @@ class ShadowAcceptHandler(ioloop.BaseHandler):
         handler = LeftTunnelHandler( self._ioloop, ts)
         self._ioloop.add_handler(cli_socket.fileno(), handler, m_read=True, m_write=True) 
 
-def main():
+df main():
     logging.basicConfig(level=logging.DEBUG,
                         format='%(asctime)s %(levelname)-8s # %(message)s',
                         datefmt='%Y-%m-%d %H:%M:%S', filemode='a+')
