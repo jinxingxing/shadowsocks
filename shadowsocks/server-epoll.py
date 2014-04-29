@@ -302,21 +302,18 @@ def main():
     logging.info("listing on %s", str(sock.getsockname()))
     sock.listen(1024)
     io.add_handler(sock.fileno(), ShadowAcceptHandler(io, sock), m_read=True)
-    next_tick = time.time() + 10
-    count = 0
-    while True:
-        count += 1
-        if time.time() >= next_tick:
-            logging.info("loop count %d", count)
-            next_tick = time.time() + 10
-            pass
+    while 1:
         _s = time.time()
         io.wait_events(0.1)
         use_time = time.time() - _s
         if use_time > 0.2:
             logging.error("events process cost time: %f", use_time)
-        elif use_time < 0.1:
+        elif use_time < 0.05:
             time.sleep(0.1-use_time)
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except KeyboardInterrupt, e:
+        print ""
+        pass
