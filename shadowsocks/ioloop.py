@@ -89,9 +89,12 @@ class IOLoop(object):
             if events & MY_POLLEV_ERR:
                 # logging.debug("fd[%s] events MY_POLLEV_ERR | MY_POLLEV_HUP", fd)
                 handler.handle_error(events)
+                self.remove_handler(fd) 
+
             elif events & MY_POLLEV_IN or events & MY_POLLEV_PRI:
                 # logging.debug("fd[%s] events MY_POLLEV_IN | MY_POLLEV_PRI", fd)
                 handler.handle_read()
+
             elif events & MY_POLLEV_OUT:
                 # logging.debug("fd[%s] events MY_POLLEV_OUT", fd)
                 handler.handle_write()
