@@ -202,7 +202,7 @@ class IOHandler(BaseHandler):
         self._ios.real_write()
 
     def handle_error(self, events):
-        logging.error("handle_error fd(%s), events: %s", self._fd, binascii.b2a_hex(events))
+        logging.error("handle_error fd(%s), events: %r", self._fd, events)
         self._ios.close()
 
 

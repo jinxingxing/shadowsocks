@@ -37,7 +37,7 @@ except ImportError:
     print >>sys.stderr, 'warning: gevent not found, using threading instead'
 """
 
-sys.setrecursionlimit(30)
+sys.setrecursionlimit(90)
 import socket
 import struct
 import os
@@ -162,7 +162,7 @@ class BaseTunnelHandler(ioloop.IOHandler):
                 self.close_tunnel()
                 return
 
-        logging.info("handle_read(), local:%d, remote:%d, Handler:%r", 
+        logging.debug("handle_read(), local:%d, remote:%d, Handler:%r", 
                         self._ios.fileno(), self._remote_ios.fileno(), self)
         try:
             s = self.do_stream_read()
@@ -303,8 +303,14 @@ def main():
     logging.info("listing on %s", str(sock.getsockname()))
     sock.listen(1024)
     io.add_handler(sock.fileno(), MyAcceptHandler(io, sock), m_read=True)
+    timeout = 0.1
+    min_looptime = 0.01
     while True:
-        io.wait_events(0.1)
+        _start = time.time()
+        io.wait_events(timeout)
+        sleep_time = min_looptime - (time.time()-_start)
+        if sleep_time > 0:
+            time.sleep(sleep_time)
 
 global G_CONFIG 
 if __name__ == '__main__':
@@ -314,4 +320,6 @@ if __name__ == '__main__':
         except (socket.error, ioloop.IOLoopError), e:
             import traceback
             logging.error(traceback.format_exc())
+            break
+        except KeyboardInterrupt, e:
             break
