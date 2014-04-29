@@ -97,12 +97,6 @@ class BaseTunnelHandler(ioloop.IOHandler):
 
     def close_tunnel(self):
         self._closing =  True
-        if self._remote_ios:
-            logging.debug('!!!!!!!!!!! close remote ios %d', 
-                self._remote_ios.fileno())
-            self._ioloop.remove_handler(self._remote_ios.fileno())
-            self._remote_ios.safe_close()
-
         logging.debug('!!!!!!!!!!! close local ios %d', self._ios.fileno())
         self._ioloop.remove_handler(self._ios.fileno())
         self._ios.safe_close()
