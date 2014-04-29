@@ -136,7 +136,7 @@ class IOStream(object):
         return self._obj.close()
 
     def fileno(self):
-        return self._fd
+        return self._obj.fileno()
 
 
 class SocketStream(IOStream):
@@ -150,6 +150,8 @@ class SocketStream(IOStream):
                 self._obj.sendall(data)
             except socket.error, _e:
                 if _e.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
+                    import errno
+                    logging.debug('socket.error: %d', errno.errorcode.get(_e.errno, 0))
                     return 
 
             self._wbuf.truncate(0)
@@ -164,16 +166,16 @@ class BaseHandler(object):
     monitor_read = True
     monitor_write = True
     def __init__(self, _ioloop, _ios):
-        raise
+        raise NotImplementedError
 
     def handle_read(self, fd, events):
-        raise
+        raise NotImplementedError
 
     def handle_write(self, fd, events):
-        raise
+        raise NotImplementedError
 
     def handle_error(self, fd, events):
-        raise
+        raise NotImplementedError
 
 
 class IOHandler(BaseHandler):
@@ -214,10 +216,7 @@ class IOHandler(BaseHandler):
 
     def handle_error(self, fd, events):
         logging.error("handle_error fd(%s), events: %r", fd, events)
-        try:
-            self._ios.close()
-        except Exception, e:
-            loggin.error("handle_error() close() exception: %s", e)
+        self._ios.safe_close()
 
 
 class SimpleCopyFileHandler(IOHandler):

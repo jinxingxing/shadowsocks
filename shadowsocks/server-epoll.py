@@ -71,16 +71,22 @@ class TunnelStream(ioloop.SocketStream):
     def read(self, *args, **kwargs):
         s = ioloop.SocketStream.read(self, *args, **kwargs)
         return s
+
+    def write(self, *args, **kwargs):
+        # logging.debug('TunnelStream.write()')
+        ioloop.SocketStream.write(self, *args, **kwargs)
+
     def real_write(self, *args, **kwargs):
+        # logging.debug('TunnelStream.real_write()')
         ioloop.SocketStream.real_write(self, *args, **kwargs)
 
-class BaseTunnelHandler(ioloop.BaseHandler):
-    def __init__(self, *args, **kwargs):
-        ioloop.BaseHandler.__init__(self, *args, **kwargs)
+class BaseTunnelHandler(ioloop.IOHandler):
+    def __init__(self, _ioloop, _ios, *args, **kwargs):
+        ioloop.IOHandler.__init__(self, _ioloop, _ios)
         self.encryptor = encrypt.Encryptor(G_CONFIG["password"], G_CONFIG["method"])
-        self._ios = None
+        self._ioloop = _ioloop
+        self._ios = _ios
         self._remote_ios = None
-        self._connecting = False
         self._closing = False
 
     def encrypt(self, data):
@@ -95,25 +101,146 @@ class BaseTunnelHandler(ioloop.BaseHandler):
             logging.debug('!!!!!!!!!!! close remote ios %d', 
                 self._remote_ios.fileno())
             self._ioloop.remove_handler(self._remote_ios.fileno())
-            self._remote_ios._obj.close()
+            self._remote_ios.safe_close()
 
         logging.debug('!!!!!!!!!!! close local ios %d', self._ios.fileno())
         self._ioloop.remove_handler(self._ios.fileno())
-        self._ios.close()
+        self._ios.safe_close()
+
+class ShadowClientConnHandler(BaseTunnelHandler):
+    def __init__(self, _ioloop, _ios, *args, **kwargs):
+        BaseTunnelHandler.__init__(self, _ioloop, _ios, *args, **kwargs)
+        self._connecting = False
 
     def handle_read(self, fd, events):
-        raise NotImplementedError
+        self.connect_to_remote()
+
+    def connect_to_remote(self):
+        if self._connecting:
+            return
+
+        self._connecting = True
+        rfile = self._ios
+        iv_len = self.encryptor.iv_len()
+        if iv_len:
+            self.decrypt(rfile.read(iv_len))
+        addrtype = ord(self.decrypt(rfile.read(1)))
+        if addrtype == 1:
+            addr = socket.inet_ntoa(self.decrypt(rfile.read(4)))
+        elif addrtype == 3:
+            addr = self.decrypt(rfile.read(ord(self.decrypt(rfile.read(1)))))
+        elif addrtype == 4:
+            addr = socket.inet_ntop(socket.AF_INET6, self.decrypt(rfile.read(16)))
+        else:
+            # not supported
+            logging.warn('addr_type(%d) not supported, maybe wrong password', addrtype)
+            return
+        port = struct.unpack('>H', self.decrypt(rfile.read(2)))[0]
+        try:
+            logging.info('connecting to remote %s:%d', addr, port)
+            _start_time = time.time()
+            remote_socket = socket.socket()
+            remote_socket.setblocking(0)
+
+            try:
+                # ret = remote_socket.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                # logging.info("ret: %r", ret)
+                remote_socket.connect((addr, port))
+            except socket.error, _e:
+                if _e.errno != errno.EINPROGRESS:
+                    raise _e
+
+            logging.info('socket.connect() cost time: %f', time.time()-_start_time)
+        except socket.error, e:
+            # Connection refused
+            logging.warn(e)
+            return
+
+        remote_ts = TunnelStream(remote_socket)
+        handler = ShadowRemoteConnHandler(self._ioloop, self._ios, remote_ts)
+        self._ioloop.add_handler(remote_ts.fileno(), handler, m_read=True, m_write=True) 
+        # self._ioloop.remove_handler(self._ios.fileno())
+        return
+
+class ShadowRemoteConnHandler(BaseTunnelHandler):
+    def __init__(self, _ioloop, _ios, _remote_ios, *args, **kwargs):
+        BaseTunnelHandler.__init__(self, _ioloop, _ios, *args, **kwargs)
+        self._client_ios = _ios
+        self._remote_ios = _remote_ios
 
     def handle_write(self, fd, events):
-        raise NotImplementedError
+        self.handle_connect_result(fd, events)
+
+    def handle_read(self, fd, events):
+        self.handle_connect_result(fd, events)
 
     def handle_error(self, fd, events):
-        raise NotImplementedError
+        self.handle_connect_result(fd, events)
 
+    def handle_connect_result(self, fd, events):
+        import errno
+        ret = self._remote_ios._obj.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+        if ret != 0:
+            logging.info("!!!!!!!!!!!! none-block connect, error_no: %d(%s)", ret, errno.errorcode.get(ret, None))
+            self.close_tunnel()
+            return
+
+        self._ioloop.remove_handler(self._client_ios.fileno())
+        self._ioloop.remove_handler(self._remote_ios.fileno())
+
+        handler = ShadowTunnelHandler(self._ioloop, self._client_ios, self._remote_ios)
+        self._ioloop.add_handler(self._client_ios.fileno(), handler, m_read=True, m_write=True)
+        self._ioloop.add_handler(self._remote_ios.fileno(), handler, m_read=True, m_write=True)
+
+        logging.info('New tunnel %d <=> %d' % ( self._client_ios.fileno(), self._remote_ios.fileno()))
 
 class ShadowTunnelHandler(BaseTunnelHandler):
-    def __init__(self, *args, **kwargs):
-        BaseTunnelHandler.__init__(self, *args, **kwargs)
+    def __init__(self, _ioloop, _ios, _remote_ios, *args, **kwargs):
+        BaseTunnelHandler.__init__(self, _ioloop, _ios, *args, **kwargs)
+        self._remote_ios = _remote_ios
+        self._client_ios = _ios
+
+    def handle_write(self, fd, events):
+        """fd 可写事件出现"""
+        assert fd in (self._remote_ios.fileno(), self._client_ios.fileno())
+        if  fd == self._remote_ios.fileno():
+            write_ios = self._remote_ios
+        else:
+            write_ios = self._client_ios
+        write_ios.real_write()
+
+    def handle_error(self, fd, events):
+        self.close_tunnel()
+
+    def handle_read(self, fd, events):
+        logging.debug("handle_read(), client:%d, remote:%d, events_fd:%d, Handler:%r", 
+                        self._ios.fileno(), self._remote_ios.fileno(), fd, self)
+        try:
+            _s = time.time()
+            assert fd in (self._remote_ios.fileno(), self._client_ios.fileno())
+            if  fd == self._remote_ios.fileno():
+                s = self._remote_ios.read(4096)
+                # print s
+                s = self.encrypt(s)
+                write_ios = self._client_ios
+            else:
+                s = self._client_ios.read(4096)
+                s = self.decrypt(s)
+                # print s
+                write_ios = self._remote_ios
+            if len(s) == 0:
+                logging.debug('iostream[%s].read() return len(s) == 0, close it', self._fd)
+                self.close_tunnel()
+
+            _s = time.time()
+            write_ios.write(s)
+            return
+        except socket.error, _e:
+            if _e.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
+                logging.debug('socket error, %s', _e)
+                return
+            else:
+                raise _e
 
 class ShadowAcceptHandler(ioloop.BaseHandler):
     def __init__(self, _ioloop, srv_socket):
@@ -124,11 +251,11 @@ class ShadowAcceptHandler(ioloop.BaseHandler):
         cli_socket, cli_addr = self._srv_socket.accept()
         logging.debug("accept connect[%s] from %s:%s" % (
             cli_socket.fileno(), cli_addr[0], cli_addr[1]))
+
         cli_socket.setblocking(0)
         ts = TunnelStream(cli_socket)
-        handler = LeftTunnelHandler( self._ioloop, ts)
-        self._ioloop.add_handler(cli_socket.fileno(), handler, 
-            m_read=True, m_write=True) 
+        handler = ShadowClientConnHandler( self._ioloop, ts)
+        self._ioloop.add_handler(cli_socket.fileno(), handler, m_read=True) 
 
 def main():
     logging.basicConfig(level=logging.DEBUG,
@@ -187,6 +314,9 @@ def main():
         io.wait_events(0.1)
         use_time = time.time() - _s
         if use_time > 0.2:
-            logging.error("events process cost time: %f", _e-_s)
+            logging.error("events process cost time: %f", use_time)
         elif use_time < 0.1:
             time.sleep(0.1-use_time)
+
+if __name__ == '__main__':
+    main()
