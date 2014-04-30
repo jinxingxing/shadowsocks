@@ -49,13 +49,18 @@ import utils
 
 def send_all(sock, data):
     bytes_sent = 0
+    logging.debug("fd: %d, send(%d bytes)", sock.fileno(), len(data))
+    r = 0
     while True:
         r = sock.send(data[bytes_sent:])
         if r < 0:
-            return r
+            break
         bytes_sent += r
         if bytes_sent == len(data):
-            return bytes_sent
+            r = bytes_sent
+            break
+    logging.debug("fd: %d, send done")
+    return r
 
 
 class ThreadingTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):

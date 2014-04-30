@@ -23,14 +23,12 @@ except ImportError, e:
 try:
     from select import epoll as pollerFact
     MY_POLLEV_IN = select.EPOLLIN
-    MY_POLLEV_PRI = select.EPOLLPRI
     MY_POLLEV_OUT = select.EPOLLOUT
     MY_POLLEV_ERR = select.EPOLLERR
 except ImportError, e:
     print >> sys.stderr, e
     pollerFact = select.poll
     MY_POLLEV_IN = select.POLLIN
-    MY_POLLEV_PRI = select.POLLPRI
     MY_POLLEV_OUT = select.POLLOUT
     MY_POLLEV_ERR = select.POLLERR
 
@@ -58,26 +56,35 @@ class IOLoop(object):
             raise IOLoopError(u'fd(%s) handler is %s' % (fd, self._fd_map[fd]))
 
         flags = MY_POLLEV_ERR
-    	if m_read:
-	    flags |= MY_POLLEV_IN | MY_POLLEV_PRI 
+        if m_read:
+	        flags |= MY_POLLEV_IN
     	if m_write:
-	    flags |= MY_POLLEV_OUT
+	        flags |= MY_POLLEV_OUT
 
         self._poller.register(fd, flags)
         #self._set_nonblocking(fd)
         self._fd_map[fd] = handler
-        logging.debug('len(ioloop._fd_map) = %d', len(self._fd_map))
+        logging.debug('len(fd_map) = %d', len(self._fd_map))
 
     def remove_handler(self, fd):
         handler = self._fd_map.pop(fd)
         del handler
         self._poller.unregister(fd)
-        logging.debug('unregister %d,current len(ioloop._fd_map) = %d', fd, len(self._fd_map))
+        # logging.debug('fd %d unregistered, len(fd_map) = %d', fd, len(self._fd_map))
 
+    def modify_events(self, fd, m_read=False, m_write=False):
+        flags = MY_POLLEV_ERR
+        if m_read:
+	        flags |= MY_POLLEV_IN
+    	if m_write:
+	        flags |= MY_POLLEV_OUT
+        self._poller.modify(fd, flags)
 
-    def modify_handler(self, fd, handler, m_read=False, m_write=False):
-		self.remove_handler(fd)
-		self.add_handler(fd, handler, m_read=False, m_write=False)
+    def modify_handler(self, fd, _handler=None, m_read=False, m_write=False):
+        if _handler is None:
+            _handler = self._fd_map[fd]
+        self.remove_handler(fd)
+        self.add_handler(fd, _handler, m_read, m_write)
 
     def wait_events(self, timeout):
         events_list = self._poller.poll(timeout)
@@ -86,19 +93,17 @@ class IOLoop(object):
                 logging.warn('fd %d not in fd_map', fd)
                 self._poller.unregister(fd)
                 continue
+            # self._poller.unregister(299)
             # logging.info('fd %d, events %d', fd, events)
             handler = self._fd_map[fd]
             if events & MY_POLLEV_ERR:
-                # logging.debug("fd[%s] events MY_POLLEV_ERR | MY_POLLEV_HUP", fd)
                 handler.handle_error(fd, events)
-            elif events & MY_POLLEV_IN or events & MY_POLLEV_PRI:
-                # logging.debug("fd[%s] events MY_POLLEV_IN | MY_POLLEV_PRI", fd)
+                continue
+
+            if events & MY_POLLEV_IN:
                 handler.handle_read(fd, events)
-            elif events & MY_POLLEV_OUT:
-                # logging.debug("fd[%s] events MY_POLLEV_OUT", fd)
+            if events & MY_POLLEV_OUT:
                 handler.handle_write(fd, events)
-            else:
-                logging.error("unknow events %d", events)
 
     #@staticmethod
     #def _set_nonblocking(fd):
