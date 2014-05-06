@@ -103,7 +103,8 @@ class TunnelStream(ioloop.SocketStream):
                     del self._lbuf[0]
             except socket.error, _e:
                 if _e.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
-                    logging.debug('real_write(), socket.error %s', errno.errorcode.get(_e.errno, None))
+                    logging.debug('real_write(), socket[%d].error %s', 
+                        self._fd, errno.errorcode.get(_e.errno, None))
                     return 
             finally:
                 # self._obj.setblocking(0)
@@ -240,8 +241,7 @@ class ShadowTunnelHandler(BaseTunnelHandler):
 
     def handle_write(self, fd, events):
         """fd 可写事件出现"""
-        if fd not in self._fd_ios_map:
-            return 
+        assert fd in self._fd_ios_map
 
         write_ios = self._fd_ios_map[fd]
         write_ios.real_write()
@@ -261,8 +261,9 @@ class ShadowTunnelHandler(BaseTunnelHandler):
             else:
                 write_ios = self._remote_ios
 
-            if len(write_ios) >= 256: # 256*4096 = 1M
+            if len(write_ios) >= 256: # 256*4096
                 # self.handle_write(write_ios.fileno(), 0)
+                logging.warn("fd %d, buf len %d", write_ios.fileno(), len(write_ios))
                 return 
                 # logging.warn("fd %d, buf len %d, close it", write_ios.fileno(), len(write_ios))
                 # for t_fd in self._fd_ios_map.keys():
@@ -290,7 +291,7 @@ class ShadowTunnelHandler(BaseTunnelHandler):
 
         except socket.error, _e:
             if _e.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
-                logging.debug('socket error, %s', _e)
+                logging.debug('socket[%d] error, %s', fd, _e)
                 return
             else:
                 traceback.print_exc()
