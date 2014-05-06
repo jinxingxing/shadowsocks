@@ -85,8 +85,7 @@ class TunnelStream(ioloop.SocketStream):
         if len(data) == 0:
             return
         self._lbuf.append(data)
-        # logging.debug('TunnelStream[%d].write() buf len %d', self._fd, len(self._lbuf))
-        # self.real_write()
+        self.real_write()
         self._ioloop.modify_events(self._fd, True, True)
 
     def real_write(self, *args, **kwargs):
